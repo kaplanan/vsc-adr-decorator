@@ -1,25 +1,34 @@
 import * as vscode from 'vscode';
 const yaml = require('js-yaml');
 
+// Generic rate limit configuration terms
 const COMPLIANT: string = 'compliant';
 const DESTINATION: string = 'destination';
 const REQUEST_RATE: string = 'requestrate';
+const INTERVAL: string = 'interval';
+
+// Istio provider related
+const ISTIO: string = 'istio';
 const REQUEST_RATE_ISTIO: string = 'maxAmount'; 
 const INTERVAL_ISTIO: string = 'validDuration';
 const DIMENSIONS_ISTIO: string = 'dimensions';
-const ISTIO: string = 'istio';
+
+// Kong provider related
 const KONG: string = 'kong';
-const INTERVAL: string = 'interval';
+
+// ADR file related
 const CONFIG_DOC: string = '## Config Set';
 const ADR_DIR = '/doc/architecture/decisions/';
 const ADR_FILE = 'rate_limit_adr_0001.md';
 
-// this method is called when vs code is activated
+// Messages
+const MEMQUOTA_NOT_FOUND: string = 'No memquota found in this template file';
+const ADR_COMPLIANT: string = 'Compliant with ADR';
+const ADR_VIOLATED: string = 'ADR violated';
+
+
 export function activate(context: vscode.ExtensionContext) {
-	let message: string = '';
-
 	console.log('adr decorator is activated');
-
 	let timeout: NodeJS.Timer | undefined = undefined;
 
 	// create a decorator type for violation annotations
@@ -41,38 +50,33 @@ export function activate(context: vscode.ExtensionContext) {
 	let activeEditor = vscode.window.activeTextEditor;
 
 	async function updateDecorations() {
-		if (!activeEditor) {
-			return;
-		}
+		if (!activeEditor) return;
 
+		// --> Get the text of the current open template file
 		const text = activeEditor.document.getText();
 		const docs: any = yaml.loadAll(text);
 
+		// --> Check for which provider the current template file is written
 		let provider: string = '';
 		for (let doc of docs) {
-			if (doc['kind'] != undefined) {
-				provider = ISTIO;
-				console.log("set to istio");
-			} 
-			if (doc['plugins'] != undefined) {
-				provider = KONG;
-				console.log("set to kong");
-			}
+			if (doc['kind'] != undefined) 	 provider = ISTIO;
+			if (doc['plugins'] != undefined) provider = KONG;
 		}
 
-		let matchClause: string = '';
-		let configLookUp: {[key: string]: any} = {};
-
+		// READ THE ADR FILE IN THE CORRESPONDING DIRECTORY
+		// --> Get the ADR file path 
 		let filepath = activeEditor.document.uri.path.substring(0, activeEditor.document.fileName.lastIndexOf('\\'));
 		filepath = filepath.substring(0, filepath.lastIndexOf('/')) + ADR_DIR + ADR_FILE;
-		const it = await vscode.workspace.openTextDocument(filepath).then((document) => {
-			let md = document.getText();
-			let mdList: string[] = md.split('\n');
+		
+		// --> Read the file and store the configuration in a lookup table
+		let configLookUp: {[key: string]: any} = {};
+		const ADRDocument = await vscode.workspace.openTextDocument(filepath).then((document) => {
 			let isConfig: boolean = false;
+			let mdList = document.getText().split('\n');
 			for (let line in mdList) {
-				if (!isConfig && mdList[line] === CONFIG_DOC) {
-					isConfig = true;
-				} else if (isConfig) {
+				if (!isConfig) {
+					isConfig = (mdList[line] === CONFIG_DOC) ? true : false;
+				} else {
 					let configSet = mdList[line];
 					let configProps = JSON.parse(configSet);
 					configLookUp[DESTINATION] = configProps.destination;
@@ -83,18 +87,22 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		});
 
+		// WRITE THE LOOKUP TABLE INTO VARIABLES
 		let config_destination = configLookUp[DESTINATION];
 		let config_rate = configLookUp[REQUEST_RATE];
 		let config_interval = configLookUp[INTERVAL];
 
+		// CHECK FOR COMPLIANCE FOR >>ISTIO<< TEMPLATE FILE
+		let matchClause: string = '';
+		let annotationTag: string = '';
 		if (provider == ISTIO) {
-			console.log("is istio");
+			console.log("Provider: " + ISTIO);
 			for (let doc of docs) {
 				if (doc['kind'] == 'handler') {
 					let config_quota_handler = doc;
 					let quotas;
 					if (config_quota_handler) { quotas = config_quota_handler['spec']['params']['quotas'][0]; } 
-					else { return 'No memquota found in this template file'; }
+					else { return MEMQUOTA_NOT_FOUND; }
 					let template_rate = quotas[REQUEST_RATE_ISTIO];
 					let template_interval = quotas[REQUEST_RATE_ISTIO];
 					let overrides: {[key: string]: {[key: string]: string}}[] = quotas['overrides'];
@@ -111,33 +119,38 @@ export function activate(context: vscode.ExtensionContext) {
 					let interval: string = '';
 					if (config_interval != template_interval) { interval = config_interval; } else { interval = COMPLIANT; }
 					if (rate != COMPLIANT || interval != COMPLIANT) { 
-						message = 'ADR violated: ' + '<' + REQUEST_RATE_ISTIO + rate + '> <' + INTERVAL_ISTIO + ': ' + interval + '>'; 
+						annotationTag = ADR_VIOLATED + ': ' + '<' + REQUEST_RATE_ISTIO + ': ' + rate + '> <' + INTERVAL_ISTIO + ': ' + interval + '>'; 
 					} else {
-						message = 'Compliant with ADR';
+						annotationTag = ADR_COMPLIANT;
 					}
 				}
 			}
 		}
 
+		// CHECK FOR COMPLIANCE FOR >>KONG<< TEMPLATE FILE
 		else if (provider == KONG) {
 			console.log("Provider: " + KONG);
 			matchClause = 'plugins';
-			message = 'This is the matching property';
+			annotationTag = 'This is the matching property';
 		}
 
+		// IF IT IS NOT A SUPPORTED PROVIDER IGNORE THE GIVEN FILE
 		else {
 			console.log("Provider: None of " + ISTIO + " & " + KONG);
 			matchClause = "nothing";
-			message = "there is no annotation for this";
+			annotationTag = "there is no annotation for this";
 		}
 
+		// PUSH VIOLATION TAGS IN THE RIGHT POSITION OF THE CURRENT TEMPLATE FILE
+		// --> matchClause describes for which regex the highlighting will be done
+		// --> annotationTag describes the content of the highlighting when hovering over it
 		const regEx = new RegExp(matchClause, 'g');
 		const violationTags: vscode.DecorationOptions[] = [];
 		let match;
 		while (match = regEx.exec(text)) {
 			const startPos = activeEditor.document.positionAt(match.index);
 			const endPos = activeEditor.document.positionAt(match.index + match[0].length);
-			const decoration = { range: new vscode.Range(startPos, endPos), hoverMessage: message};
+			const decoration = { range: new vscode.Range(startPos, endPos), hoverMessage: annotationTag};
 			violationTags.push(decoration);
 		}
 		activeEditor.setDecorations(violationDecorationType, violationTags);
