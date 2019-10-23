@@ -10,8 +10,8 @@ export function activate(context: vscode.ExtensionContext) {
 
 	let timeout: NodeJS.Timer | undefined = undefined;
 
-	// create a decorator type that we use to decorate small numbers
-	const smallNumberDecorationType = vscode.window.createTextEditorDecorationType({
+	// create a decorator type for violation annotations
+	const violationDecorationType = vscode.window.createTextEditorDecorationType({
 		borderWidth: '10px',
 		borderStyle: 'solid',
 		overviewRulerColor: 'blue',
@@ -24,13 +24,6 @@ export function activate(context: vscode.ExtensionContext) {
 			// this color will be used in dark color themes
 			borderColor: 'lightblue'
 		}
-	});
-
-	// create a decorator type that we use to decorate large numbers
-	const largeNumberDecorationType = vscode.window.createTextEditorDecorationType({
-		cursor: 'crosshair',
-		// use a themable color. See package.json for the declaration and default values.
-		backgroundColor: { id: 'myextension.largeNumberBackground' }
 	});
 
 	let activeEditor = vscode.window.activeTextEditor;
@@ -53,22 +46,50 @@ export function activate(context: vscode.ExtensionContext) {
 		let matchClause: string = '';
 		switch(provider) {
 			case 'istio': {
-
+				/*
 				let filepath = activeEditor.document.uri.path.substring(0, activeEditor.document.fileName.lastIndexOf('\\'));
-				filepath = filepath.substring(0, filepath.lastIndexOf('/')) + '/doc/architecture/decisions/rate_limit_adr_0001.md'.replace('c:', 'C:');
-				
-				
+				filepath = filepath.substring(0, filepath.lastIndexOf('/')) + '/doc/architecture/decisions/rate_limit_adr_0001.md';
+				const fileReader = new FileReader();
+				const file = new File([filepath], 'rate_limit_adr_0001');
+				let fileContent: string = '';
+				fileReader.onload = (e) => { fileContent = (<string>fileReader.result); }
+				fileReader.readAsText(file);
+				message = fileContent;
+				*/
 
+				/*
+				const readline = require('readline');
+				const fs = require('fs');
+				const readInterface = readline.createInterface({ // TODO: SOLVE THIS SOMEHOW!
+					input: fs.createReadStream(filepath),
+					output: process.stdout,
+					console: false
+				});
+
+				let isConfig: boolean = false;
+				let configSet: string = '';
+				readInterface.on('line', function(line: string) {
+					if (isConfig) { 
+						configSet = line;
+						isConfig = false; 
+					}
+					if (line.match('/## Config Set/gm')) { 
+						isConfig = true; 
+						message = "match";
+					}
+					//message = 'hello';
+				});
 				
-				//let configProps = JSON.parse(configSet);
-
-				//let config_destination: string = configProps.destination;
-				//let config_rate: string = configProps.requestrate;
-				//let config_interval: string = configProps.interval;
-
-				let config_destination: string = 'productpage';
+				let configProps = JSON.parse(configSet);
+				let config_destination: string = configProps.destination;
+				let config_rate: string = configProps.requestrate;
+				let config_interval: string = configProps.interval;
+				 */
+				
+				let config_destination: string = 'reviews';
 				let config_rate: string = '90';
 				let config_interval: string = '75s';
+				
 
 				for (let doc of docs) {
 					if (doc['kind'] == 'handler') {
@@ -91,28 +112,29 @@ export function activate(context: vscode.ExtensionContext) {
 						if (config_rate != template_rate) { rate = config_rate; } else { rate = 'compliant'; }
 						let interval: string = '';
 						if (config_interval != template_interval) { interval = config_interval; } else { interval = 'compliant'; }
-						message = 'rate: ' + rate + ' || interval: ' + interval;
+						if (rate != 'compliant' || interval != 'compliant') { 
+							message = 'ADR violated: ' + '<rate: ' + rate + '> <interval: ' + interval + '>'; 
+						} else {
+							message = 'Compliant with ADR';
+						}
+						
 					}
 				}
+				
 
 			}
 		}
 		
 		const regEx = new RegExp(matchClause, 'g');
-		//const regEx = /dimensions+/g;
-		const smallNumbers: vscode.DecorationOptions[] = [];
-		const largeNumbers: vscode.DecorationOptions[] = [];
+		const violationTags: vscode.DecorationOptions[] = [];
 		let match;
 		while (match = regEx.exec(text)) {
 			const startPos = activeEditor.document.positionAt(match.index);
 			const endPos = activeEditor.document.positionAt(match.index + match[0].length);
-
-			const decoration = { range: new vscode.Range(startPos, endPos), hoverMessage: 'Violated **' + message +  '**' };
-			smallNumbers.push(decoration);
-
+			const decoration = { range: new vscode.Range(startPos, endPos), hoverMessage: message};
+			violationTags.push(decoration);
 		}
-		activeEditor.setDecorations(smallNumberDecorationType, smallNumbers);
-		activeEditor.setDecorations(largeNumberDecorationType, largeNumbers);
+		activeEditor.setDecorations(violationDecorationType, violationTags);
 	}
 
 	function triggerUpdateDecorations() {
