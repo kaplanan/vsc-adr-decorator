@@ -1,12 +1,24 @@
 import * as vscode from 'vscode';
 const yaml = require('js-yaml');
 
+const COMPLIANT: string = 'compliant';
+const DESTINATION: string = 'destination';
+const REQUEST_RATE: string = 'requestrate';
+const REQUEST_RATE_ISTIO: string = 'maxAmount'; 
+const INTERVAL_ISTIO: string = 'validDuration';
+const DIMENSIONS_ISTIO: string = 'dimensions';
+const ISTIO: string = 'istio';
+const KONG: string = 'kong';
+const INTERVAL: string = 'interval';
+const CONFIG_DOC: string = '## Config Set';
+const ADR_DIR = '/doc/architecture/decisions/';
+const ADR_FILE = 'rate_limit_adr_0001.md';
 
 // this method is called when vs code is activated
 export function activate(context: vscode.ExtensionContext) {
 	let message: string = '';
 
-	console.log('decorator sample is activated');
+	console.log('adr decorator is activated');
 
 	let timeout: NodeJS.Timer | undefined = undefined;
 
@@ -39,11 +51,11 @@ export function activate(context: vscode.ExtensionContext) {
 		let provider: string = '';
 		for (let doc of docs) {
 			if (doc['kind'] != undefined) {
-				provider = 'istio';
+				provider = ISTIO;
 				console.log("set to istio");
 			} 
 			if (doc['plugins'] != undefined) {
-				provider = 'kong';
+				provider = KONG;
 				console.log("set to kong");
 			}
 		}
@@ -52,30 +64,30 @@ export function activate(context: vscode.ExtensionContext) {
 		let configLookUp: {[key: string]: any} = {};
 
 		let filepath = activeEditor.document.uri.path.substring(0, activeEditor.document.fileName.lastIndexOf('\\'));
-		filepath = filepath.substring(0, filepath.lastIndexOf('/')) + '/doc/architecture/decisions/rate_limit_adr_0001.md';
+		filepath = filepath.substring(0, filepath.lastIndexOf('/')) + ADR_DIR + ADR_FILE;
 		const it = await vscode.workspace.openTextDocument(filepath).then((document) => {
 			let md = document.getText();
 			let mdList: string[] = md.split('\n');
 			let isConfig: boolean = false;
 			for (let line in mdList) {
-				if (!isConfig && mdList[line] == '## Config Set') {
+				if (!isConfig && mdList[line] === CONFIG_DOC) {
 					isConfig = true;
 				} else if (isConfig) {
 					let configSet = mdList[line];
 					let configProps = JSON.parse(configSet);
-					configLookUp['destination'] = configProps.destination;
-					configLookUp['requestrate'] = configProps.requestrate;
-					configLookUp['interval'] = configProps.interval;
+					configLookUp[DESTINATION] = configProps.destination;
+					configLookUp[REQUEST_RATE] = configProps.requestrate;
+					configLookUp[INTERVAL] = configProps.interval;
 					isConfig = false;
 				}
 			}
 		});
 
-		let config_destination = configLookUp['destination'];
-		let config_rate = configLookUp['requestrate'];
-		let config_interval = configLookUp['interval'];
+		let config_destination = configLookUp[DESTINATION];
+		let config_rate = configLookUp[REQUEST_RATE];
+		let config_interval = configLookUp[INTERVAL];
 
-		if (provider == 'istio') {
+		if (provider == ISTIO) {
 			console.log("is istio");
 			for (let doc of docs) {
 				if (doc['kind'] == 'handler') {
@@ -83,23 +95,23 @@ export function activate(context: vscode.ExtensionContext) {
 					let quotas;
 					if (config_quota_handler) { quotas = config_quota_handler['spec']['params']['quotas'][0]; } 
 					else { return 'No memquota found in this template file'; }
-					let template_rate = quotas['maxAmount'];
-					let template_interval = quotas['validDuration'];
+					let template_rate = quotas[REQUEST_RATE_ISTIO];
+					let template_interval = quotas[REQUEST_RATE_ISTIO];
 					let overrides: {[key: string]: {[key: string]: string}}[] = quotas['overrides'];
 					let quota_override: {[key: string]: {[key: string]: string}} = {};
 					for (quota_override of overrides) {
-						if (config_destination == quota_override['dimensions']['destination']) {
-							template_rate = quota_override['maxAmount'];
-							template_interval = quota_override['validDuration'];
-							matchClause = 'destination: ' +  quota_override['dimensions']['destination'];
+						if (config_destination == quota_override[DIMENSIONS_ISTIO][DESTINATION]) {
+							template_rate = quota_override[REQUEST_RATE_ISTIO];
+							template_interval = quota_override[REQUEST_RATE_ISTIO];
+							matchClause = DESTINATION + ': ' +  quota_override[DIMENSIONS_ISTIO][DESTINATION];
 						}
 					}
 					let rate: string = '';
-					if (config_rate != template_rate) { rate = config_rate; } else { rate = 'compliant'; }
+					if (config_rate != template_rate) { rate = config_rate; } else { rate = COMPLIANT; }
 					let interval: string = '';
-					if (config_interval != template_interval) { interval = config_interval; } else { interval = 'compliant'; }
-					if (rate != 'compliant' || interval != 'compliant') { 
-						message = 'ADR violated: ' + '<rate: ' + rate + '> <interval: ' + interval + '>'; 
+					if (config_interval != template_interval) { interval = config_interval; } else { interval = COMPLIANT; }
+					if (rate != COMPLIANT || interval != COMPLIANT) { 
+						message = 'ADR violated: ' + '<' + REQUEST_RATE_ISTIO + rate + '> <' + INTERVAL_ISTIO + ': ' + interval + '>'; 
 					} else {
 						message = 'Compliant with ADR';
 					}
@@ -107,14 +119,14 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		}
 
-		else if (provider == 'kong') {
-			console.log("is kong");
+		else if (provider == KONG) {
+			console.log("Provider: " + KONG);
 			matchClause = 'plugins';
 			message = 'This is the matching property';
 		}
 
 		else {
-			console.log("neither istio nor kong");
+			console.log("Provider: None of " + ISTIO + " & " + KONG);
 			matchClause = "nothing";
 			message = "there is no annotation for this";
 		}
@@ -141,22 +153,36 @@ export function activate(context: vscode.ExtensionContext) {
 
 	if (activeEditor) {
 		triggerUpdateDecorations();
-		// updateDecorations();
 	}
 
+	/**
+	 * Refresh the text editor content for changing to a window with
+	 * another file.
+	 */
+	vscode.window.onDidChangeActiveTextEditor(textEditor => 
+		activeEditor = textEditor, 
+		null, 
+		context.subscriptions
+	);
+
+	/**
+	 * Evaluation everytime the user saves the file
+	 */
 	vscode.workspace.onDidSaveTextDocument(textDocument => {
-		if (activeEditor && textDocument === activeEditor.document) {
+		if (activeEditor && textDocument === activeEditor.document)
 			triggerUpdateDecorations();
-			// updateDecorations();
-		}
 	}, null, context.subscriptions);
 
+	/**
+	 * Evaluation is triggered everytime the user opens a file
+	 */
 	vscode.workspace.onDidOpenTextDocument(textDocument => {
-		if (activeEditor && textDocument === activeEditor.document) {
+		if (activeEditor) {
+			activeEditor = (textDocument !== activeEditor.document) 
+				? vscode.window.activeTextEditor 
+				: activeEditor;
 			triggerUpdateDecorations();
-			// updateDecorations();
 		}
 	}, null, context.subscriptions);
-
 }
 
