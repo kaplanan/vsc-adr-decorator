@@ -28,7 +28,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	let activeEditor = vscode.window.activeTextEditor;
 
-	function updateDecorations() {
+	async function updateDecorations() {
 		if (!activeEditor) {
 			return;
 		}
@@ -40,91 +40,85 @@ export function activate(context: vscode.ExtensionContext) {
 		for (let doc of docs) {
 			if (doc['kind'] != undefined) {
 				provider = 'istio';
+				console.log("set to istio");
+			} 
+			if (doc['plugins'] != undefined) {
+				provider = 'kong';
+				console.log("set to kong");
 			}
 		}
 
 		let matchClause: string = '';
-		switch(provider) {
-			case 'istio': {
-				/*
-				let filepath = activeEditor.document.uri.path.substring(0, activeEditor.document.fileName.lastIndexOf('\\'));
-				filepath = filepath.substring(0, filepath.lastIndexOf('/')) + '/doc/architecture/decisions/rate_limit_adr_0001.md';
-				const fileReader = new FileReader();
-				const file = new File([filepath], 'rate_limit_adr_0001');
-				let fileContent: string = '';
-				fileReader.onload = (e) => { fileContent = (<string>fileReader.result); }
-				fileReader.readAsText(file);
-				message = fileContent;
-				*/
+		let configLookUp: {[key: string]: any} = {};
 
-				/*
-				const readline = require('readline');
-				const fs = require('fs');
-				const readInterface = readline.createInterface({ // TODO: SOLVE THIS SOMEHOW!
-					input: fs.createReadStream(filepath),
-					output: process.stdout,
-					console: false
-				});
+		let filepath = activeEditor.document.uri.path.substring(0, activeEditor.document.fileName.lastIndexOf('\\'));
+		filepath = filepath.substring(0, filepath.lastIndexOf('/')) + '/doc/architecture/decisions/rate_limit_adr_0001.md';
+		const it = await vscode.workspace.openTextDocument(filepath).then((document) => {
+			let md = document.getText();
+			let mdList: string[] = md.split('\n');
+			let isConfig: boolean = false;
+			for (let line in mdList) {
+				if (!isConfig && mdList[line] == '## Config Set') {
+					isConfig = true;
+				} else if (isConfig) {
+					let configSet = mdList[line];
+					let configProps = JSON.parse(configSet);
+					configLookUp['destination'] = configProps.destination;
+					configLookUp['requestrate'] = configProps.requestrate;
+					configLookUp['interval'] = configProps.interval;
+					isConfig = false;
+				}
+			}
+		});
 
-				let isConfig: boolean = false;
-				let configSet: string = '';
-				readInterface.on('line', function(line: string) {
-					if (isConfig) { 
-						configSet = line;
-						isConfig = false; 
-					}
-					if (line.match('/## Config Set/gm')) { 
-						isConfig = true; 
-						message = "match";
-					}
-					//message = 'hello';
-				});
-				
-				let configProps = JSON.parse(configSet);
-				let config_destination: string = configProps.destination;
-				let config_rate: string = configProps.requestrate;
-				let config_interval: string = configProps.interval;
-				 */
-				
-				let config_destination: string = 'reviews';
-				let config_rate: string = '90';
-				let config_interval: string = '75s';
-				
+		let config_destination = configLookUp['destination'];
+		let config_rate = configLookUp['requestrate'];
+		let config_interval = configLookUp['interval'];
 
-				for (let doc of docs) {
-					if (doc['kind'] == 'handler') {
-						let config_quota_handler = doc;
-						let quotas;
-						if (config_quota_handler) { quotas = config_quota_handler['spec']['params']['quotas'][0]; } 
-						else { return 'No memquota found in this template file'; }
-        				let template_rate = quotas['maxAmount'];
-        				let template_interval = quotas['validDuration'];
-        				let overrides: {[key: string]: {[key: string]: string}}[] = quotas['overrides'];
-        				let quota_override: {[key: string]: {[key: string]: string}} = {};
-        				for (quota_override of overrides) {
-        				    if (config_destination == quota_override['dimensions']['destination']) {
-        				        template_rate = quota_override['maxAmount'];
-								template_interval = quota_override['validDuration'];
-								matchClause = 'destination: ' +  quota_override['dimensions']['destination'];
-        				    }
+		if (provider == 'istio') {
+			console.log("is istio");
+			for (let doc of docs) {
+				if (doc['kind'] == 'handler') {
+					let config_quota_handler = doc;
+					let quotas;
+					if (config_quota_handler) { quotas = config_quota_handler['spec']['params']['quotas'][0]; } 
+					else { return 'No memquota found in this template file'; }
+					let template_rate = quotas['maxAmount'];
+					let template_interval = quotas['validDuration'];
+					let overrides: {[key: string]: {[key: string]: string}}[] = quotas['overrides'];
+					let quota_override: {[key: string]: {[key: string]: string}} = {};
+					for (quota_override of overrides) {
+						if (config_destination == quota_override['dimensions']['destination']) {
+							template_rate = quota_override['maxAmount'];
+							template_interval = quota_override['validDuration'];
+							matchClause = 'destination: ' +  quota_override['dimensions']['destination'];
 						}
-						let rate: string = '';
-						if (config_rate != template_rate) { rate = config_rate; } else { rate = 'compliant'; }
-						let interval: string = '';
-						if (config_interval != template_interval) { interval = config_interval; } else { interval = 'compliant'; }
-						if (rate != 'compliant' || interval != 'compliant') { 
-							message = 'ADR violated: ' + '<rate: ' + rate + '> <interval: ' + interval + '>'; 
-						} else {
-							message = 'Compliant with ADR';
-						}
-						
+					}
+					let rate: string = '';
+					if (config_rate != template_rate) { rate = config_rate; } else { rate = 'compliant'; }
+					let interval: string = '';
+					if (config_interval != template_interval) { interval = config_interval; } else { interval = 'compliant'; }
+					if (rate != 'compliant' || interval != 'compliant') { 
+						message = 'ADR violated: ' + '<rate: ' + rate + '> <interval: ' + interval + '>'; 
+					} else {
+						message = 'Compliant with ADR';
 					}
 				}
-				
-
 			}
 		}
-		
+
+		else if (provider == 'kong') {
+			console.log("is kong");
+			matchClause = 'plugins';
+			message = 'This is the matching property';
+		}
+
+		else {
+			console.log("neither istio nor kong");
+			matchClause = "nothing";
+			message = "there is no annotation for this";
+		}
+
 		const regEx = new RegExp(matchClause, 'g');
 		const violationTags: vscode.DecorationOptions[] = [];
 		let match;
@@ -147,18 +141,20 @@ export function activate(context: vscode.ExtensionContext) {
 
 	if (activeEditor) {
 		triggerUpdateDecorations();
+		// updateDecorations();
 	}
 
-	vscode.window.onDidChangeActiveTextEditor(editor => {
-		activeEditor = editor;
-		if (editor) {
+	vscode.workspace.onDidSaveTextDocument(textDocument => {
+		if (activeEditor && textDocument === activeEditor.document) {
 			triggerUpdateDecorations();
+			// updateDecorations();
 		}
 	}, null, context.subscriptions);
 
-	vscode.workspace.onDidChangeTextDocument(event => {
-		if (activeEditor && event.document === activeEditor.document) {
+	vscode.workspace.onDidOpenTextDocument(textDocument => {
+		if (activeEditor && textDocument === activeEditor.document) {
 			triggerUpdateDecorations();
+			// updateDecorations();
 		}
 	}, null, context.subscriptions);
 
