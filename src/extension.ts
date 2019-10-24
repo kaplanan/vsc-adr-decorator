@@ -110,7 +110,7 @@ export function activate(context: vscode.ExtensionContext) {
 					for (quota_override of overrides) {
 						if (config_destination == quota_override[DIMENSIONS_ISTIO][DESTINATION]) {
 							template_rate = quota_override[REQUEST_RATE_ISTIO];
-							template_interval = quota_override[REQUEST_RATE_ISTIO];
+							template_interval = quota_override[INTERVAL_ISTIO];
 							matchClause = DESTINATION + ': ' +  quota_override[DIMENSIONS_ISTIO][DESTINATION];
 						}
 					}
